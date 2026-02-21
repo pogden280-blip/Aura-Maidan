@@ -87,6 +87,46 @@
             return <span ref={containerRef} className={`inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}></span>;
         };
 
+        // --- JSONbin Config ---
+        const JSONBIN_CONFIG = {
+            BIN_ID: '6999021a43b1c97be98fc289',
+            MASTER_KEY: '$2a$10$RxtN.VwYLRsGcmoCji08oeL2di9W0D4tyrBZe/vIV77N665ALQ9Vi'
+        };
+
+        const JSONBinService = {
+            async fetchProducts() {
+                try {
+                    const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_CONFIG.BIN_ID}/latest`, {
+                        headers: {
+                            'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch');
+                    const data = await response.json();
+                    return data.record || [];
+                } catch (error) {
+                    console.error('Error fetching from JSONbin:', error);
+                    return null;
+                }
+            },
+            async updateProducts(products) {
+                try {
+                    const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_CONFIG.BIN_ID}`, {
+                        method: 'PUT',
+                        headers: {
+                            'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(products)
+                    });
+                    return response.ok;
+                } catch (error) {
+                    console.error('Error updating JSONbin:', error);
+                    return false;
+                }
+            }
+        };
+
         // --- Data ---
         const INITIAL_JEWELRY_DATA = [
             { 
@@ -158,7 +198,7 @@
                 setFormData(prev => ({ ...prev, video: '' }));
             };
 
-            const handleSave = (e) => {
+            const handleSave = async (e) => {
                 e.preventDefault();
                 if (isUploading) return alert('Aguarde o upload ser concluído.');
                 if (formData.images.length === 0) return alert('Por favor, faça o upload de pelo menos uma foto.');
@@ -170,11 +210,22 @@
                     video: formData.video || undefined
                 };
 
+                let updatedProducts;
                 if (editingItem) {
-                    setProducts(products.map(p => p.id === editingItem.id ? newItem : p));
+                    updatedProducts = products.map(p => p.id === editingItem.id ? newItem : p);
                 } else {
-                    setProducts([...products, newItem]);
+                    updatedProducts = [...products, newItem];
                 }
+
+                // Update local state first for responsiveness
+                setProducts(updatedProducts);
+                
+                // Persist to JSONbin
+                const success = await JSONBinService.updateProducts(updatedProducts);
+                if (!success) {
+                    alert('Erro ao salvar no banco de dados. Verifique sua conexão.');
+                }
+
                 setEditingItem(null);
                 setFormData({ name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '' });
             };
@@ -190,9 +241,15 @@
                 });
             };
 
-            const deleteItem = (id) => {
+            const deleteItem = async (id) => {
                 if (confirm('Tem certeza que deseja excluir esta peça?')) {
-                    setProducts(products.filter(p => p.id !== id));
+                    const updatedProducts = products.filter(p => p.id !== id);
+                    setProducts(updatedProducts);
+                    
+                    const success = await JSONBinService.updateProducts(updatedProducts);
+                    if (!success) {
+                        alert('Erro ao excluir do banco de dados.');
+                    }
                 }
             };
 
@@ -459,6 +516,7 @@
         function App() {
             const [showCatalog, setShowCatalog] = useState(false);
             const [products, setProducts] = useState(INITIAL_JEWELRY_DATA);
+            const [isLoading, setIsLoading] = useState(true);
             const [selectedCategory, setSelectedCategory] = useState('Tudo');
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedItem, setSelectedItem] = useState(null);
@@ -466,6 +524,17 @@
             const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
             const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
             const [pressProgress, setPressProgress] = useState(0);
+
+            useEffect(() => {
+                const loadData = async () => {
+                    const data = await JSONBinService.fetchProducts();
+                    if (data && data.length > 0) {
+                        setProducts(data);
+                    }
+                    setIsLoading(false);
+                };
+                loadData();
+            }, []);
             
             const longPressTimer = useRef(null);
             const progressInterval = useRef(null);
@@ -528,6 +597,12 @@
 
             return (
                 <div className="min-h-screen flex flex-col font-sans overflow-x-hidden bg-luxury-black text-white">
+                    {isLoading && (
+                        <div className="fixed inset-0 z-[500] bg-luxury-black flex flex-col items-center justify-center">
+                            <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin mb-4"></div>
+                            <p className="text-gold font-serif tracking-widest animate-pulse">CARREGANDO AURA...</p>
+                        </div>
+                    )}
                     <AnimatePresence mode="wait">
                         {!showCatalog ? (
                             <motion.div
