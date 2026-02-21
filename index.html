@@ -103,6 +103,7 @@
                     });
                     if (!response.ok) throw new Error('Failed to fetch');
                     const data = await response.json();
+                    console.log('Fetched data from JSONbin:', data);
                     return data.record || [];
                 } catch (error) {
                     console.error('Error fetching from JSONbin:', error);
@@ -115,10 +116,15 @@
                         method: 'PUT',
                         headers: {
                             'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY,
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'X-Bin-Versioning': 'false'
                         },
                         body: JSON.stringify(products)
                     });
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        console.error('JSONbin error details:', errorData);
+                    }
                     return response.ok;
                 } catch (error) {
                     console.error('Error updating JSONbin:', error);
@@ -146,6 +152,7 @@
         const AdminPanel = ({ products, setProducts, onClose }) => {
             const [editingItem, setEditingItem] = useState(null);
             const [isUploading, setIsUploading] = useState(false);
+            const [isSaving, setIsSaving] = useState(false);
             const [formData, setFormData] = useState({
                 name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: ''
             });
@@ -221,13 +228,16 @@
                 setProducts(updatedProducts);
                 
                 // Persist to JSONbin
+                setIsSaving(true);
                 const success = await JSONBinService.updateProducts(updatedProducts);
+                setIsSaving(false);
+                
                 if (!success) {
                     alert('Erro ao salvar no banco de dados. Verifique sua conexão.');
+                } else {
+                    setEditingItem(null);
+                    setFormData({ name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '' });
                 }
-
-                setEditingItem(null);
-                setFormData({ name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '' });
             };
 
             const startEdit = (item) => {
@@ -387,8 +397,12 @@
                                         />
                                     </div>
                                     <div className="flex gap-2 pt-4">
-                                        <button type="submit" className="flex-1 bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-light transition-colors">
-                                            {editingItem ? 'Atualizar' : 'Adicionar'}
+                                        <button 
+                                            type="submit" 
+                                            disabled={isSaving || isUploading}
+                                            className="flex-1 bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-light transition-colors disabled:opacity-50"
+                                        >
+                                            {isSaving ? 'Salvando...' : (editingItem ? 'Atualizar' : 'Adicionar')}
                                         </button>
                                         {editingItem && (
                                             <button type="button" onClick={() => {setEditingItem(null); setFormData({name:'', category:'Correntes', price:'', description:'', images:[], video:'', material:'', stone:''})}} className="px-6 border border-white/10 rounded-xl">Cancelar</button>
@@ -528,8 +542,12 @@
             useEffect(() => {
                 const loadData = async () => {
                     const data = await JSONBinService.fetchProducts();
-                    if (data && data.length > 0) {
-                        setProducts(data);
+                    if (data !== null) {
+                        // If we got data (even an empty array), use it.
+                        // If it's the first time and bin is empty, we keep INITIAL_JEWELRY_DATA
+                        if (Array.isArray(data) && data.length > 0) {
+                            setProducts(data);
+                        }
                     }
                     setIsLoading(false);
                 };
