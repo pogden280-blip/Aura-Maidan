@@ -154,8 +154,11 @@
             const [editingItem, setEditingItem] = useState(null);
             const [isUploading, setIsUploading] = useState(false);
             const [isSaving, setIsSaving] = useState(false);
+            const [isDeclareSaleOpen, setIsDeclareSaleOpen] = useState(false);
+            const [isManualId, setIsManualId] = useState(false);
+            const [saleData, setSaleData] = useState({ productId: '', quantity: 1 });
             const [formData, setFormData] = useState({
-                name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '', stock: ''
+                id: '', name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '', stock: ''
             });
 
             const categories = ['Pulseiras', 'Pingentes', 'Correntes', 'Brincos', 'Anéis & Dedeiras', 'Conjuntos'];
@@ -211,9 +214,17 @@
                 if (isUploading) return alert('Aguarde o upload ser concluído.');
                 if (formData.images.length === 0) return alert('Por favor, faça o upload de pelo menos uma foto.');
 
+                const finalId = isManualId && formData.id ? formData.id : (editingItem ? editingItem.id : Date.now().toString());
+                
+                // Check if the new ID is already used by ANOTHER piece
+                const idExists = products.some(p => p.id === finalId && (!editingItem || p.id !== editingItem.id));
+                if (idExists) {
+                    return alert('Este código já está em uso por outra peça.');
+                }
+
                 const newItem = {
                     ...formData,
-                    id: editingItem ? editingItem.id : Date.now().toString(),
+                    id: finalId,
                     price: Number(formData.price),
                     stock: Number(formData.stock) || 0,
                     video: formData.video || undefined
@@ -221,7 +232,11 @@
 
                 let updatedProducts;
                 if (editingItem) {
+                    // Replace the item that has the ORIGINAL id
                     updatedProducts = products.map(p => p.id === editingItem.id ? newItem : p);
+                } else if (products.some(p => p.id === finalId)) {
+                    // Handle case where ID might match an existing one even without editingItem
+                    updatedProducts = products.map(p => p.id === finalId ? newItem : p);
                 } else {
                     updatedProducts = [...products, newItem];
                 }
@@ -238,20 +253,52 @@
                     alert('Erro ao salvar no banco de dados. Verifique sua conexão.');
                 } else {
                     setEditingItem(null);
-                    setFormData({ name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '', stock: '' });
+                    setIsManualId(false);
+                    setFormData({ id: '', name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '', stock: '' });
                 }
             };
 
             const startEdit = (item) => {
                 setEditingItem(item);
+                setIsManualId(true);
                 setFormData({ 
                     ...item, 
+                    id: item.id,
                     price: item.price.toString(), 
                     stock: (item.stock || 0).toString(),
                     images: item.images, 
                     video: item.video || '',
                     stone: item.stone || ''
                 });
+            };
+
+            const handleDeclareSale = async (e) => {
+                e.preventDefault();
+                if (!saleData.productId) return alert('Selecione uma peça.');
+                
+                const product = products.find(p => p.id === saleData.productId);
+                if (!product) return alert('Peça não encontrada.');
+                
+                const qty = Number(saleData.quantity);
+                if (isNaN(qty) || qty <= 0) return alert('Quantidade inválida.');
+                if (product.stock < qty) return alert('Estoque insuficiente.');
+
+                const updatedProducts = products.map(p => 
+                    p.id === saleData.productId ? { ...p, stock: p.stock - qty } : p
+                );
+
+                setProducts(updatedProducts);
+                setIsSaving(true);
+                const success = await JSONBinService.updateProducts(updatedProducts);
+                setIsSaving(false);
+
+                if (success) {
+                    alert('Venda declarada com sucesso! Estoque atualizado.');
+                    setIsDeclareSaleOpen(false);
+                    setSaleData({ productId: '', quantity: 1 });
+                } else {
+                    alert('Erro ao atualizar o banco de dados.');
+                }
             };
 
             const deleteItem = async (id) => {
@@ -271,154 +318,261 @@
                     <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={onClose} />
                     <div className="relative w-full max-w-4xl bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
                         <div className="p-6 border-b border-white/10 flex justify-between items-center text-white">
-                            <h2 className="text-xl font-serif gold-gradient font-bold">Painel Administrativo</h2>
+                            <div className="flex items-center gap-4">
+                                <h2 className="text-xl font-serif gold-gradient font-bold">Painel Administrativo</h2>
+                                <button 
+                                    onClick={() => setIsDeclareSaleOpen(!isDeclareSaleOpen)}
+                                    className={`text-xs px-4 py-1.5 rounded-full border transition-all ${isDeclareSaleOpen ? 'bg-gold text-black border-gold' : 'border-white/20 hover:border-gold text-white/60 hover:text-gold'}`}
+                                >
+                                    {isDeclareSaleOpen ? 'Voltar ao Cadastro' : 'Declarar Venda'}
+                                </button>
+                            </div>
                             <button onClick={onClose} className="text-white/40 hover:text-white"><Icon name="x" size={24} /></button>
                         </div>
                         
                         <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-8 text-white">
-                            {/* Form */}
+                            {/* Form or Declare Sale */}
                             <div className="lg:w-1/2">
-                                <form onSubmit={handleSave} className="space-y-4">
-                                    <h3 className="text-sm uppercase tracking-widest text-gold mb-4">{editingItem ? 'Editar Peça' : 'Nova Peça'}</h3>
-                                    <input 
-                                        type="text" placeholder="Nome da Peça" required
-                                        value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 focus:border-gold outline-none"
-                                    />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <select 
-                                            value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}
-                                            className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                        >
-                                            {categories.map(c => <option key={c} value={c} className="bg-zinc-900">{c}</option>)}
-                                        </select>
-                                        <input 
-                                            type="number" placeholder="Preço (R$)" required
-                                            value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})}
-                                            className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                        />
+                                {isDeclareSaleOpen ? (
+                                    <div className="space-y-6">
+                                        <h3 className="text-sm uppercase tracking-widest text-gold">Declarar Venda</h3>
+                                        <form onSubmit={handleDeclareSale} className="space-y-4">
+                                            <div className="space-y-2">
+                                                <label className="text-xs text-white/40 uppercase tracking-widest">Selecionar Peça</label>
+                                                <select 
+                                                    required
+                                                    value={saleData.productId}
+                                                    onChange={e => setSaleData({...saleData, productId: e.target.value})}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-gold"
+                                                >
+                                                    <option value="" className="bg-zinc-900">Selecione uma peça...</option>
+                                                    {products.map(p => (
+                                                        <option key={p.id} value={p.id} className="bg-zinc-900">
+                                                            {p.name} (ID: {p.id.slice(-4)}) - Est: {p.stock}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-xs text-white/40 uppercase tracking-widest">Quantidade Vendida</label>
+                                                <input 
+                                                    type="number" 
+                                                    min="1"
+                                                    required
+                                                    value={saleData.quantity}
+                                                    onChange={e => setSaleData({...saleData, quantity: e.target.value})}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-gold"
+                                                />
+                                            </div>
+                                            <button 
+                                                type="submit"
+                                                disabled={isSaving}
+                                                className="w-full bg-emerald-600 text-white font-bold py-4 rounded-xl hover:bg-emerald-500 transition-colors disabled:opacity-50 mt-4"
+                                            >
+                                                {isSaving ? 'Processando...' : 'Confirmar Venda'}
+                                            </button>
+                                        </form>
+                                        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                                            <p className="text-xs text-white/40 leading-relaxed">
+                                                <Icon name="info" size={12} className="inline mr-1 mb-0.5" />
+                                                Ao confirmar, a quantidade informada será subtraída do estoque atual da peça selecionada.
+                                            </p>
+                                        </div>
                                     </div>
-                                    <textarea 
-                                        placeholder="Descrição" required rows="3"
-                                        value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                    />
-                                    
-                                    <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-white/40 uppercase tracking-widest">Fotos da Peça (Máx 3)</label>
-                                            <div className="grid grid-cols-4 gap-4 items-center">
-                                                {formData.images.map((img, idx) => (
-                                                    <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 group">
-                                                        <img src={img} className="w-full h-full object-cover" />
-                                                        <button 
-                                                            type="button"
-                                                            onClick={() => removeImage(idx)}
-                                                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-red-500"
-                                                        >
-                                                            <Icon name="trash-2" size={20} />
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                                {formData.images.length < 3 && (
-                                                    <div className="relative aspect-square">
-                                                        <input 
-                                                            type="file" 
-                                                            accept="image/*"
-                                                            onChange={(e) => handleAssetUpload(e, 'image')}
-                                                            className="hidden" 
-                                                            id="image-upload"
-                                                            disabled={isUploading}
-                                                        />
-                                                        <label 
-                                                            htmlFor="image-upload"
-                                                            className={`flex flex-col items-center justify-center gap-1 w-full h-full bg-white/5 border border-dashed border-white/20 rounded-xl cursor-pointer hover:border-gold/50 transition-all ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
-                                                        >
-                                                            <Icon name="upload" size={18} />
-                                                            <span className="text-[10px]">Foto</span>
-                                                        </label>
-                                                    </div>
-                                                )}
+                                ) : (
+                                    <div className="space-y-6">
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    setEditingItem(null);
+                                                    setIsManualId(false);
+                                                    setFormData({ id: '', name: '', category: 'Correntes', price: '', description: '', images: [], video: '', material: '', stone: '', stock: '' });
+                                                }}
+                                                className={`flex-1 py-2 text-xs uppercase tracking-widest rounded-xl border transition-all ${!editingItem ? 'bg-gold text-black border-gold font-bold' : 'border-white/10 text-white/40'}`}
+                                            >
+                                                Nova Peça
+                                            </button>
+                                            <div className="relative flex-1">
+                                                <select 
+                                                    onChange={(e) => {
+                                                        const item = products.find(p => p.id === e.target.value);
+                                                        if (item) startEdit(item);
+                                                    }}
+                                                    className={`w-full py-2 px-4 text-xs uppercase tracking-widest rounded-xl border bg-transparent outline-none transition-all ${editingItem ? 'bg-gold text-black border-gold font-bold' : 'border-white/10 text-white/40'}`}
+                                                    value={editingItem ? editingItem.id : ''}
+                                                >
+                                                    <option value="" className="bg-zinc-900">Usar Existente...</option>
+                                                    {products.map(p => <option key={p.id} value={p.id} className="bg-zinc-900">{p.name}</option>)}
+                                                </select>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-white/40 uppercase tracking-widest">Vídeo da Peça (Opcional)</label>
-                                            <div className="flex gap-4 items-center">
-                                                <div className="relative flex-1">
-                                                    <input 
-                                                        type="file" 
-                                                        accept="video/*"
-                                                        onChange={(e) => handleAssetUpload(e, 'video')}
-                                                        className="hidden" 
-                                                        id="video-upload"
-                                                        disabled={isUploading}
-                                                    />
-                                                    <label 
-                                                        htmlFor="video-upload"
-                                                        className={`flex items-center justify-center gap-2 w-full bg-white/5 border border-dashed border-white/20 rounded-xl px-4 py-4 cursor-pointer hover:border-gold/50 transition-all ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+                                        <form onSubmit={handleSave} className="space-y-4">
+                                            <div className="flex justify-between items-end">
+                                                <h3 className="text-sm uppercase tracking-widest text-gold">{editingItem ? 'Reposição / Edição' : 'Cadastro de Peça'}</h3>
+                                                {!editingItem && (
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setIsManualId(!isManualId)}
+                                                        className="text-[10px] uppercase tracking-widest text-white/40 hover:text-gold transition-colors"
                                                     >
-                                                        {isUploading ? (
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-4 h-4 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-                                                                <span className="text-sm">Enviando...</span>
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <Icon name="upload" size={18} />
-                                                                <span className="text-sm">{formData.video ? 'Trocar Vídeo' : 'Fazer Upload de Vídeo'}</span>
-                                                            </>
-                                                        )}
-                                                    </label>
-                                                </div>
-                                                {formData.video && (
-                                                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-white/10 group">
-                                                        <video src={formData.video} className="w-full h-full object-cover" />
-                                                        <button 
-                                                            type="button"
-                                                            onClick={removeVideo}
-                                                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-red-500"
-                                                        >
-                                                            <Icon name="trash-2" size={16} />
-                                                        </button>
-                                                    </div>
+                                                        {isManualId ? 'Usar ID Automático' : 'Definir Código Manual'}
+                                                    </button>
                                                 )}
                                             </div>
-                                        </div>
-                                    </div>
 
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input 
-                                            type="text" placeholder="Material"
-                                            value={formData.material} onChange={e => setFormData({...formData, material: e.target.value})}
-                                            className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                        />
-                                        <input 
-                                            type="number" placeholder="Estoque"
-                                            value={formData.stock} onChange={e => setFormData({...formData, stock: e.target.value})}
-                                            className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                        />
+                                            {isManualId && (
+                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                    <label className="text-[10px] uppercase tracking-widest text-white/40">Código da Peça</label>
+                                                    <input 
+                                                        type="text" placeholder="Ex: COLAR-001" required
+                                                        value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 focus:border-gold outline-none"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <input 
+                                                type="text" placeholder="Nome da Peça" required
+                                                value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 focus:border-gold outline-none"
+                                            />
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <select 
+                                                    value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}
+                                                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                                >
+                                                    {categories.map(c => <option key={c} value={c} className="bg-zinc-900">{c}</option>)}
+                                                </select>
+                                                <input 
+                                                    type="number" placeholder="Preço (R$)" required
+                                                    value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})}
+                                                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                                />
+                                            </div>
+                                            <textarea 
+                                                placeholder="Descrição" required rows="3"
+                                                value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                            />
+                                            
+                                            <div className="space-y-4">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs text-white/40 uppercase tracking-widest">Fotos da Peça (Máx 3)</label>
+                                                    <div className="grid grid-cols-4 gap-4 items-center">
+                                                        {formData.images.map((img, idx) => (
+                                                            <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 group">
+                                                                <img src={img} className="w-full h-full object-cover" />
+                                                                <button 
+                                                                    type="button"
+                                                                    onClick={() => removeImage(idx)}
+                                                                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-red-500"
+                                                                >
+                                                                    <Icon name="trash-2" size={20} />
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                        {formData.images.length < 3 && (
+                                                            <div className="relative aspect-square">
+                                                                <input 
+                                                                    type="file" 
+                                                                    accept="image/*"
+                                                                    onChange={(e) => handleAssetUpload(e, 'image')}
+                                                                    className="hidden" 
+                                                                    id="image-upload"
+                                                                    disabled={isUploading}
+                                                                />
+                                                                <label 
+                                                                    htmlFor="image-upload"
+                                                                    className={`flex flex-col items-center justify-center gap-1 w-full h-full bg-white/5 border border-dashed border-white/20 rounded-xl cursor-pointer hover:border-gold/50 transition-all ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+                                                                >
+                                                                    <Icon name="upload" size={18} />
+                                                                    <span className="text-[10px]">Foto</span>
+                                                                </label>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <label className="text-xs text-white/40 uppercase tracking-widest">Vídeo da Peça (Opcional)</label>
+                                                    <div className="flex gap-4 items-center">
+                                                        <div className="relative flex-1">
+                                                            <input 
+                                                                type="file" 
+                                                                accept="video/*"
+                                                                onChange={(e) => handleAssetUpload(e, 'video')}
+                                                                className="hidden" 
+                                                                id="video-upload"
+                                                                disabled={isUploading}
+                                                            />
+                                                            <label 
+                                                                htmlFor="video-upload"
+                                                                className={`flex items-center justify-center gap-2 w-full bg-white/5 border border-dashed border-white/20 rounded-xl px-4 py-4 cursor-pointer hover:border-gold/50 transition-all ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+                                                            >
+                                                                {isUploading ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-4 h-4 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+                                                                        <span className="text-sm">Enviando...</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <Icon name="upload" size={18} />
+                                                                        <span className="text-sm">{formData.video ? 'Trocar Vídeo' : 'Fazer Upload de Vídeo'}</span>
+                                                                    </>
+                                                                )}
+                                                            </label>
+                                                        </div>
+                                                        {formData.video && (
+                                                            <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-white/10 group">
+                                                                <video src={formData.video} className="w-full h-full object-cover" />
+                                                                <button 
+                                                                    type="button"
+                                                                    onClick={removeVideo}
+                                                                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-red-500"
+                                                                >
+                                                                    <Icon name="trash-2" size={16} />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <input 
+                                                    type="text" placeholder="Material"
+                                                    value={formData.material} onChange={e => setFormData({...formData, material: e.target.value})}
+                                                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                                />
+                                                <input 
+                                                    type="number" placeholder="Estoque"
+                                                    value={formData.stock} onChange={e => setFormData({...formData, stock: e.target.value})}
+                                                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <input 
+                                                    type="text" placeholder="Pedra (opcional)"
+                                                    value={formData.stone} onChange={e => setFormData({...formData, stone: e.target.value})}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
+                                                />
+                                            </div>
+                                            <div className="flex gap-2 pt-4">
+                                                <button 
+                                                    type="submit" 
+                                                    disabled={isSaving || isUploading}
+                                                    className="flex-1 bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-light transition-colors disabled:opacity-50"
+                                                >
+                                                    {isSaving ? 'Salvando...' : (editingItem ? 'Atualizar Estoque' : 'Cadastrar Peça')}
+                                                </button>
+                                                {editingItem && (
+                                                    <button type="button" onClick={() => {setEditingItem(null); setIsManualId(false); setFormData({id:'', name:'', category:'Correntes', price:'', description:'', images:[], video:'', material:'', stone:'', stock:''})}} className="px-6 border border-white/10 rounded-xl">Cancelar</button>
+                                                )}
+                                            </div>
+                                        </form>
                                     </div>
-                                    <div className="grid grid-cols-1 gap-4">
-                                        <input 
-                                            type="text" placeholder="Pedra (opcional)"
-                                            value={formData.stone} onChange={e => setFormData({...formData, stone: e.target.value})}
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 outline-none"
-                                        />
-                                    </div>
-                                    <div className="flex gap-2 pt-4">
-                                        <button 
-                                            type="submit" 
-                                            disabled={isSaving || isUploading}
-                                            className="flex-1 bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-light transition-colors disabled:opacity-50"
-                                        >
-                                            {isSaving ? 'Salvando...' : (editingItem ? 'Atualizar' : 'Adicionar')}
-                                        </button>
-                                        {editingItem && (
-                                            <button type="button" onClick={() => {setEditingItem(null); setFormData({name:'', category:'Correntes', price:'', description:'', images:[], video:'', material:'', stone:''})}} className="px-6 border border-white/10 rounded-xl">Cancelar</button>
-                                        )}
-                                    </div>
-                                </form>
+                                )}
                             </div>
 
                             {/* List */}
@@ -683,8 +837,6 @@
                 const loadData = async () => {
                     const data = await JSONBinService.fetchProducts();
                     if (data !== null) {
-                        // If we got data (even an empty array), use it.
-                        // If it's the first time and bin is empty, we keep INITIAL_JEWELRY_DATA
                         if (Array.isArray(data) && data.length > 0) {
                             setProducts(data);
                         }
@@ -692,6 +844,13 @@
                     setIsLoading(false);
                 };
                 loadData();
+
+                // Check for admin parameter in URL
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('admin') === 'true') {
+                    setShowCatalog(true);
+                    setIsAdminPanelOpen(true);
+                }
             }, []);
 
             const addToCart = (product) => {
@@ -784,7 +943,9 @@
             const handlePasswordConfirm = (pass) => {
                 if (pass === "2026adm") {
                     setIsPasswordModalOpen(false);
-                    setIsAdminPanelOpen(true);
+                    // Open admin panel in a new tab
+                    const adminUrl = window.location.origin + window.location.pathname + "?admin=true";
+                    window.open(adminUrl, '_blank');
                 } else {
                     alert("Senha incorreta.");
                 }
@@ -1000,7 +1161,13 @@
                             <AdminPanel 
                                 products={products} 
                                 setProducts={setProducts} 
-                                onClose={() => setIsAdminPanelOpen(false)} 
+                                onClose={() => {
+                                    setIsAdminPanelOpen(false);
+                                    // Remove query param from URL without refreshing
+                                    const url = new URL(window.location);
+                                    url.searchParams.delete('admin');
+                                    window.history.pushState({}, '', url);
+                                }} 
                             />
                         )}
                     </AnimatePresence>
